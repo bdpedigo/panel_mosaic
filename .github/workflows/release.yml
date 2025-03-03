@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # want this to be the version that was just bumped
-          ref: master
+          ref: main
       - name: Install uv
         id: setup-uv
         uses: astral-sh/setup-uv@v2
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/caveclient
+      url: https://pypi.org/p/panel_mosaic/
     permissions:
       id-token: write # IMPORTANT: mandatory for trusted publishing
 

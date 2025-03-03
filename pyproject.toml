@@ -1,5 +1,10 @@
 [project]
-dependencies = ["cairosvg>=2.7.1", "matplotlib>=3.9.2", "skunk>=1.3.0"]
+dependencies = [
+    "cairosvg>=2.7.1",
+    "ipython>=8.27.0",
+ "matplotlib>=3.9.2",
+ "skunk>=1.3.0",
+]
 description = "Assemble smaller panels into a multi-panel figure using Matplotlib `subplot_mosaic` syntax"
 name = "panel-mosaic"
 readme = "README.md"
