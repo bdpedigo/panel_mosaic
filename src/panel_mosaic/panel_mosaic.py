@@ -8,6 +8,7 @@ import skunk
 
 def _label_axes(
     axs,
+    label_mapping: dict[str, str] = None,
     fontsize: int = 30,
     label_pos: tuple[float, float] = (0.0, 1.0),
     horizontalalignment: str = "left",
@@ -15,6 +16,9 @@ def _label_axes(
 ) -> None:
     for label, ax in axs.items():
         ax.autoscale(False)
+        if label_mapping is not None:
+            if label in label_mapping:
+                label = label_mapping[label]
         ax.text(
             *label_pos,
             label + "",
@@ -27,6 +31,12 @@ def _label_axes(
         ax.set(xticks=[], yticks=[])
 
 
+def _ax_off(ax, panel_borders: bool = False) -> None:
+    ax.set(xticks=[], yticks=[])
+    if not panel_borders:
+        ax.spines[["left", "right", "top", "bottom"]].set_visible(False)
+
+
 class PanelMosaic:
     def __init__(
         self,
@@ -34,19 +44,29 @@ class PanelMosaic:
         figsize=(10, 8),
         layout="tight",
         gridspec_kw=None,
+        panel_borders=False,
     ):
         self.mosaic = mosaic
         self.figsize = figsize
         self.layout = layout
+        self.panel_borders = panel_borders
 
         if gridspec_kw is None:
             self.gridspec_kw = dict(hspace=0.0, wspace=0.0)
 
         self.fig, self.axs = self._set_up_axes()
+        self._format_axes()
 
         self.panel_mapping = None
 
-        self.svg = skunk.pltsvg(self.fig)
+        # self._svg = skunk.pltsvg(self.fig)
+
+    @property
+    def svg(self):
+        for label in self.svg_panel_mapping.keys():
+            skunk.connect(self.axs[label], label)
+        svg = skunk.insert(self.svg_panel_mapping)
+        return svg
 
     def _set_up_axes(self):
         # ioff/ion is to avoid displaying the matplotlib figure in notebooks, which
@@ -63,6 +83,7 @@ class PanelMosaic:
 
     def label_axes(
         self,
+        label_mapping: dict[str, str] = None,
         fontsize: int = 30,
         label_pos: tuple[float, float] = (0.0, 1.0),
         horizontalalignment: str = "left",
@@ -87,13 +108,14 @@ class PanelMosaic:
         """
         _label_axes(
             self.axs,
+            label_mapping=label_mapping,
             fontsize=fontsize,
             label_pos=label_pos,
             horizontalalignment=horizontalalignment,
             verticalalignment=verticalalignment,
         )
 
-    def format_axes(self, panel_borders: bool = False) -> None:
+    def _format_axes(self, panel_borders: bool = False) -> None:
         """
         Format the axes of the figure.
 
@@ -103,8 +125,7 @@ class PanelMosaic:
             Whether to display borders around the panels.
         """
         for _, ax in self.axs.items():
-            if not panel_borders:
-                ax.axis("off")
+            _ax_off(ax, panel_borders)
 
     def map(self, panel_mapping: dict) -> None:
         """
@@ -115,6 +136,14 @@ class PanelMosaic:
         panel_mapping :
             A dictionary mapping panel labels to file paths of panel images.
         """
+        fixed_panel_mapping = {}
+        for label, path in panel_mapping.items():
+            if isinstance(path, Path):
+                fixed_panel_mapping[label] = str(path)
+            else:
+                fixed_panel_mapping[label] = path
+        panel_mapping = fixed_panel_mapping
+
         self.panel_mapping = panel_mapping
 
         png_panel_mapping = {}
@@ -128,7 +157,7 @@ class PanelMosaic:
                 img = plt.imread(f)
                 new_ax = self.axs[label].inset_axes([0.01, 0.01, 0.98, 0.98], zorder=-1)
                 new_ax.imshow(img, interpolation="none", aspect=None)
-                new_ax.axis("off")
+                _ax_off(new_ax)
 
         svg_panel_mapping = {}
         for label, path in panel_mapping.items():
@@ -136,10 +165,14 @@ class PanelMosaic:
                 svg_panel_mapping[label] = path
         self.svg_panel_mapping = svg_panel_mapping
 
-        for label in svg_panel_mapping.keys():
-            skunk.connect(self.axs[label], label)
+        # for label in svg_panel_mapping.keys():
+        #     skunk.connect(self.axs[label], label)
+        # self.axs[label].set_axis_on()
 
-        self.svg = skunk.insert(svg_panel_mapping)
+        # self.svg = skunk.insert(svg_panel_mapping)
+
+        # for ax in self.axs.values():
+        #     ax.set_axis_on()
 
     def __repr__(self) -> str:
         rep = ""
@@ -170,6 +203,19 @@ class PanelMosaic:
         """
         skunk.display(self.svg)
 
+    def _get_dummy_axes(self):
+        return self.fig.copy(), self.axs.copy()
+
+    def get_axis_sizes(self):
+        sizes = {}
+        for label, ax in self.axs.items():
+            bbox = ax.get_window_extent().transformed(
+                self.fig.dpi_scale_trans.inverted()
+            )
+            width, height = bbox.width, bbox.height
+            sizes[label] = (width, height)
+        return sizes
+
     def show_dummies(self, fontsize: int = 20, precision: str = ".2f") -> None:
         """
         Display the figure with dummy text showing the width and height of each panel.
@@ -182,12 +228,15 @@ class PanelMosaic:
             The precision of the position displays.
         """
         dummy_fig, dummy_axs = self._set_up_axes()
+        sizes = self.get_axis_sizes()
+        # dummy_fig, dummy_axs = self._get_dummy_axes()
         _label_axes(dummy_axs)
-        for _, ax in dummy_axs.items():
-            bbox = ax.get_window_extent().transformed(
-                dummy_fig.dpi_scale_trans.inverted()
-            )
-            width, height = bbox.width, bbox.height
+        for label, ax in dummy_axs.items():
+            # bbox = ax.get_window_extent().transformed(
+            #     dummy_fig.dpi_scale_trans.inverted()
+            # )
+            # width, height = bbox.width, bbox.height
+            width, height = sizes[label]
             ax.text(
                 0.5,
                 0.5,
@@ -218,6 +267,8 @@ class PanelMosaic:
             The file formats to write the figure to. This is a tuple of strings
             currently supported are "svg" and "pdf".
         """
+        if isinstance(out_path, Path):
+            out_path = str(out_path)
         if "svg" in formats:
             self.write_svg(out_path)
         if "pdf" in formats:
