@@ -1,72 +1,63 @@
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import cairosvg
 import matplotlib.pyplot as plt
 import skunk
-
-
-def _label_axes(
-    axs,
-    label_mapping: dict[str, str] = None,
-    fontsize: int = 30,
-    label_pos: tuple[float, float] = (0.0, 1.0),
-    horizontalalignment: str = "left",
-    verticalalignment: str = "top",
-) -> None:
-    for label, ax in axs.items():
-        ax.autoscale(False)
-        if label_mapping is not None:
-            if label in label_mapping:
-                label = label_mapping[label]
-        ax.text(
-            *label_pos,
-            label + "",
-            horizontalalignment=horizontalalignment,
-            verticalalignment=verticalalignment,
-            transform=ax.transAxes,
-            fontsize=fontsize,
-            clip_on=False,
-        )
-        ax.set(xticks=[], yticks=[])
+from mpl_toolkits.axes_grid1 import Size
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 
 def _ax_off(ax, panel_borders: bool = False) -> None:
     ax.set(xticks=[], yticks=[])
     if not panel_borders:
         ax.spines[["left", "right", "top", "bottom"]].set_visible(False)
+    else:
+        ax.spines[["left", "right", "top", "bottom"]].set_visible(True)
+        ax.spines[["left", "right", "top", "bottom"]].set_linewidth(2)
+        ax.spines[["left", "right", "top", "bottom"]].set_color("black")
 
 
 class PanelMosaic:
     def __init__(
         self,
         mosaic: Any,
+        panel_mapping: Optional[dict[str, str]] = None,
         figsize=(10, 8),
         layout="tight",
         gridspec_kw=None,
         panel_borders=False,
+        label_fontsize=30,
+        label_pos=(0, 0.99),
+        label_dodge=True,
     ):
         self.mosaic = mosaic
         self.figsize = figsize
         self.layout = layout
         self.panel_borders = panel_borders
+        self.label_fontsize = label_fontsize
+        self.label_pos = label_pos
+        self.label_dodge = label_dodge
+        self.panel_mapping = panel_mapping
 
         if gridspec_kw is None:
             self.gridspec_kw = dict(hspace=0.0, wspace=0.0)
 
+        self._svg = None
         self.fig, self.axs = self._set_up_axes()
+
+        self._label_axes()
         self._format_axes()
-
-        self.panel_mapping = None
-
-        # self._svg = skunk.pltsvg(self.fig)
+        self._map()
 
     @property
     def svg(self):
-        for label in self.svg_panel_mapping.keys():
-            skunk.connect(self.axs[label], label)
-        svg = skunk.insert(self.svg_panel_mapping)
-        return svg
+        if self._svg is None:
+            for label in self.svg_panel_mapping.keys():
+                skunk.connect(self.axs[label], label)
+            svg = skunk.insert(self.svg_panel_mapping)
+            self._svg = svg
+        return self._svg
 
     def _set_up_axes(self):
         # ioff/ion is to avoid displaying the matplotlib figure in notebooks, which
@@ -81,11 +72,10 @@ class PanelMosaic:
         plt.ion()
         return fig, axs
 
-    def label_axes(
+    def _label_axes(
         self,
+        axs: Optional[dict[str, Any]] = None,
         label_mapping: dict[str, str] = None,
-        fontsize: int = 30,
-        label_pos: tuple[float, float] = (0.0, 1.0),
         horizontalalignment: str = "left",
         verticalalignment: str = "top",
     ) -> None:
@@ -94,48 +84,65 @@ class PanelMosaic:
 
         Parameters
         ----------
-        fontsize :
-            The fontsize of the panel labels.
-        label_pos :
-            The position of the panel labels. This is a tuple of two floats, where the
-            first float is the x position and the second float is the y position.
-            Coordinates are interpreted in axis space, where (0, 0) is the bottom left
-            and (1, 1) is the top right.
         horizontalalignment :
             The horizontal alignment of the panel labels.
         verticalalignment :
             The vertical alignment of the panel labels.
         """
-        _label_axes(
-            self.axs,
-            label_mapping=label_mapping,
-            fontsize=fontsize,
-            label_pos=label_pos,
-            horizontalalignment=horizontalalignment,
-            verticalalignment=verticalalignment,
-        )
+        if axs is None:
+            axs = self.axs
+        fontsize = self.label_fontsize
+        label_pos = self.label_pos
+        dodge = self.label_dodge
+        for label, ax in axs.items():
+            ax.autoscale(False)
+            if label_mapping is not None:
+                if label in label_mapping:
+                    label = label_mapping[label]
+            if dodge:
+                divider = make_axes_locatable(ax)
+                label_ax = divider.append_axes(
+                    "left", size=Size.Fixed(fontsize * 0.01), pad=0
+                )
+                label_ax.set(xticks=[], yticks=[])
+                label_ax.set_frame_on(False)
+                label_ax.set_xlim(ax.get_xlim())
+                label_ax.set_ylim(ax.get_ylim())
+                ax.set(
+                    xticks=[], yticks=[]
+                )  # for some reason this is needed for the parent axes
+            else:
+                label_ax = ax
+            label_ax.text(
+                *label_pos,
+                label + "",
+                horizontalalignment=horizontalalignment,
+                verticalalignment=verticalalignment,
+                transform=label_ax.transAxes,
+                fontsize=fontsize,
+                clip_on=False,
+            )
+            label_ax.set(xticks=[], yticks=[])
 
-    def _format_axes(self, panel_borders: bool = False) -> None:
+    def _format_axes(
+        self, axs: Optional[dict[str, Any]] = None, panel_borders: Optional[bool] = None
+    ) -> None:
         """
         Format the axes of the figure.
-
-        Parameters
-        ----------
-        panel_borders :
-            Whether to display borders around the panels.
         """
-        for _, ax in self.axs.items():
+        if axs is None:
+            axs = self.axs
+        if panel_borders is None:
+            panel_borders = self.panel_borders
+        for _, ax in axs.items():
             _ax_off(ax, panel_borders)
 
-    def map(self, panel_mapping: dict) -> None:
+    def _map(self) -> None:
         """
         Map panel images from specified file paths.
-
-        Parameters
-        ----------
-        panel_mapping :
-            A dictionary mapping panel labels to file paths of panel images.
         """
+        panel_mapping = self.panel_mapping
+
         fixed_panel_mapping = {}
         for label, path in panel_mapping.items():
             if isinstance(path, Path):
@@ -230,7 +237,8 @@ class PanelMosaic:
         dummy_fig, dummy_axs = self._set_up_axes()
         sizes = self.get_axis_sizes()
         # dummy_fig, dummy_axs = self._get_dummy_axes()
-        _label_axes(dummy_axs)
+        self._format_axes(dummy_axs, panel_borders=True)
+        self._label_axes(dummy_axs)
         for label, ax in dummy_axs.items():
             # bbox = ax.get_window_extent().transformed(
             #     dummy_fig.dpi_scale_trans.inverted()
@@ -306,17 +314,21 @@ def panel_mosaic(
     mosaic: Union[str, list[list]],
     panel_mapping: dict[str, str],
     figsize: tuple = (10, 8),
-    fontsize: int = 30,
+    label_fontsize: int = 30,
     panel_borders: bool = False,
     layout: str = "tight",
     label_pos: tuple = (0, 1),
-) -> str:
+    label_dodge: bool = True,
+) -> "PanelMosaic":
+    # TODO deprecate this function
     pm = PanelMosaic(
         mosaic=mosaic,
+        panel_mapping=panel_mapping,
         figsize=figsize,
         layout=layout,
+        panel_borders=panel_borders,
+        label_fontsize=label_fontsize,
+        label_pos=label_pos,
+        label_dodge=label_dodge,
     )
-    pm.label_axes(fontsize=fontsize, label_pos=label_pos)
-    pm.format_axes(panel_borders=panel_borders)
-    pm.map(panel_mapping)
     return pm
