@@ -29,6 +29,7 @@ class PanelMosaic:
         panel_borders=False,
         label_fontsize=30,
         label_pos=(0, 0.99),
+        label_mapping: Optional[dict[str, str]] = None,
         label_dodge=True,
     ):
         self.mosaic = mosaic
@@ -38,6 +39,7 @@ class PanelMosaic:
         self.label_fontsize = label_fontsize
         self.label_pos = label_pos
         self.label_dodge = label_dodge
+        self.label_mapping = label_mapping
         self.panel_mapping = panel_mapping
 
         if gridspec_kw is None:
@@ -75,7 +77,6 @@ class PanelMosaic:
     def _label_axes(
         self,
         axs: Optional[dict[str, Any]] = None,
-        label_mapping: dict[str, str] = None,
         horizontalalignment: str = "left",
         verticalalignment: str = "top",
     ) -> None:
@@ -96,9 +97,9 @@ class PanelMosaic:
         dodge = self.label_dodge
         for label, ax in axs.items():
             ax.autoscale(False)
-            if label_mapping is not None:
-                if label in label_mapping:
-                    label = label_mapping[label]
+            if self.label_mapping is not None:
+                if label in self.label_mapping:
+                    label = self.label_mapping[label]
             if dodge:
                 divider = make_axes_locatable(ax)
                 label_ax = divider.append_axes(
@@ -261,7 +262,10 @@ class PanelMosaic:
         skunk.display(skunk.pltsvg(dummy_fig))
 
     def write(
-        self, out_path: Union[str, Path], formats: tuple = ("svg", "pdf")
+        self,
+        out_path: Union[str, Path],
+        formats: tuple = ("svg", "pdf", "png"),
+        dpi=300,
     ) -> None:
         """
         Write the figure to specified file(s).
@@ -281,6 +285,8 @@ class PanelMosaic:
             self.write_svg(out_path)
         if "pdf" in formats:
             self.write_pdf(out_path)
+        if "png" in formats:
+            self.write_png(out_path, dpi=dpi)
 
     def write_svg(self, out_path: Union[str, Path]) -> None:
         """
@@ -308,6 +314,19 @@ class PanelMosaic:
             automatically.
         """
         cairosvg.svg2pdf(bytestring=self.svg, write_to=str(out_path) + ".pdf")
+
+    def write_png(self, out_path: Union[str, Path], dpi=300) -> None:
+        """
+        Write the figure to a PNG file.
+
+        Parameters
+        ----------
+        out_path :
+            The path to write the figure to. The file extension will be appended
+            automatically.
+        """
+        cairosvg.svg2png(bytestring=self.svg, write_to=str(out_path) + ".png", dpi=dpi)
+        # self.fig.savefig(str(out_path) + ".png", bbox_inches="tight", dpi=300)
 
 
 def panel_mosaic(
