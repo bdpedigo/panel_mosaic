@@ -1,9 +1,12 @@
+import time
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import cairosvg
 import matplotlib.pyplot as plt
 import skunk
+from matplotlib import patches as mpatches
+from matplotlib import patheffects
 from mpl_toolkits.axes_grid1 import Size
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
@@ -22,15 +25,17 @@ class PanelMosaic:
     def __init__(
         self,
         mosaic: Any,
-        panel_mapping: Optional[dict[str, str]] = None,
+        panel_mapping: Optional[dict[str, Union[str, Path]]] = None,
         figsize=(10, 8),
-        layout="tight",
+        layout="constrained",
         gridspec_kw=None,
         panel_borders=False,
         label_fontsize=30,
         label_pos=(0, 0.99),
         label_mapping: Optional[dict[str, str]] = None,
-        label_dodge=True,
+        label_dodge="left",
+        label_dodge_factor: float = 0.01,
+        label_linewidth: Optional[float] = 3,
     ):
         self.mosaic = mosaic
         self.figsize = figsize
@@ -38,12 +43,19 @@ class PanelMosaic:
         self.panel_borders = panel_borders
         self.label_fontsize = label_fontsize
         self.label_pos = label_pos
+        if isinstance(label_dodge, bool) and label_dodge:
+            label_dodge = "left"
         self.label_dodge = label_dodge
+        self.label_dodge_factor = label_dodge_factor
         self.label_mapping = label_mapping
         self.panel_mapping = panel_mapping
+        self.label_linewidth = label_linewidth
+        self.dividers = {}
 
         if gridspec_kw is None:
             self.gridspec_kw = dict(hspace=0.0, wspace=0.0)
+        else:
+            self.gridspec_kw = gridspec_kw
 
         self._svg = None
         self.fig, self.axs = self._set_up_axes()
@@ -61,6 +73,13 @@ class PanelMosaic:
             self._svg = svg
         return self._svg
 
+    # @property
+    # def svg_dummy(self):
+    #     for label in self.svg_panel_mapping.keys():
+    #         skunk.connect(self.axs[label], label)
+    #         svg = skunk.insert(self.svg_panel_mapping)
+    #         self._svg = svg
+
     def _set_up_axes(self):
         # ioff/ion is to avoid displaying the matplotlib figure in notebooks, which
         # will just look like a bunch of blue boxes
@@ -70,9 +89,22 @@ class PanelMosaic:
             figsize=self.figsize,
             layout=self.layout,
             gridspec_kw=self.gridspec_kw,
+            dpi=300,
         )
+        for ax in axs.values():
+            ax.set_anchor("E")
         plt.ion()
         return fig, axs
+
+    def get_divider(self, label: str):
+        if label in self.dividers:
+            return self.dividers[label]
+        else:
+            ax = self.axs[label]
+            ax.autoscale(False)  # TODO necessary?
+            divider = make_axes_locatable(ax)
+            self.dividers[label] = divider
+            return divider
 
     def _label_axes(
         self,
@@ -95,35 +127,94 @@ class PanelMosaic:
         fontsize = self.label_fontsize
         label_pos = self.label_pos
         dodge = self.label_dodge
-        for label, ax in axs.items():
-            ax.autoscale(False)
-            if self.label_mapping is not None:
-                if label in self.label_mapping:
-                    label = self.label_mapping[label]
-            if dodge:
-                divider = make_axes_locatable(ax)
-                label_ax = divider.append_axes(
-                    "left", size=Size.Fixed(fontsize * 0.01), pad=0
+        self.dividers = {}
+        if label_pos is not None:
+            for label, ax in axs.items():
+                mapped_label = ""
+                if self.label_mapping is not None:
+                    if label in self.label_mapping:
+                        mapped_label = self.label_mapping[label]
+
+                ax.autoscale(False)
+
+                if dodge:
+                    divider = self.get_divider(label)
+                    label_ax = divider.append_axes(
+                        self.label_dodge,
+                        size=Size.Fixed(fontsize * self.label_dodge_factor),
+                        pad=0,
+                    )
+                    label_ax.set(xticks=[], yticks=[])
+                    label_ax.set_frame_on(False)
+                    label_ax.set_xlim(ax.get_xlim())
+                    label_ax.set_ylim(ax.get_ylim())
+                    ax.set(
+                        xticks=[], yticks=[]
+                    )  # for some reason this is needed for the parent axes
+                else:
+                    label_ax = ax
+
+                text = label_ax.text(
+                    *label_pos,
+                    mapped_label + "",
+                    horizontalalignment=horizontalalignment,
+                    verticalalignment=verticalalignment,
+                    transform=label_ax.transAxes,
+                    fontsize=fontsize,
+                    clip_on=False,
                 )
+                if self.label_linewidth is not None:
+                    text.set_path_effects(
+                        [
+                            patheffects.withStroke(
+                                linewidth=self.label_linewidth, foreground="white"
+                            )
+                        ]
+                    )
                 label_ax.set(xticks=[], yticks=[])
-                label_ax.set_frame_on(False)
-                label_ax.set_xlim(ax.get_xlim())
-                label_ax.set_ylim(ax.get_ylim())
-                ax.set(
-                    xticks=[], yticks=[]
-                )  # for some reason this is needed for the parent axes
-            else:
-                label_ax = ax
-            label_ax.text(
-                *label_pos,
-                label + "",
-                horizontalalignment=horizontalalignment,
-                verticalalignment=verticalalignment,
-                transform=label_ax.transAxes,
-                fontsize=fontsize,
-                clip_on=False,
+                # label_ax.set_facecolor((0.2, 0.2, 0.2, 0.2))
+
+    def draw_arrow(self, source, side="right", size=0.1, scale=50, dummy=False) -> None:
+        """
+        Connect two axes together.
+
+        Parameters
+        ----------
+        source :
+            The label of the source axis.
+        """
+
+        divider = self.get_divider(source)
+        arrow_ax = divider.append_axes(
+            side,
+            # size=Size.Fixed(size),
+            size="{}%".format(size * 100),
+            pad=0,
+        )
+        arrow_ax.set(xticks=[], yticks=[])
+        arrow_ax.set_frame_on(False)
+
+        # arrow_ax.annotate(
+        #     "",
+        #     xy=(1, 0.5),
+        #     xytext=(0.1, 0.5),
+        #     xycoords="axes fraction",
+        #     textcoords="axes fraction",
+        #     arrowprops=dict(arrowstyle="->", lw=2.5, color="black"),
+        # )
+
+        if not dummy:
+            x_tail, y_tail = 0.1, 0.5
+            x_head, y_head = 0.9, 0.5
+            arrow = mpatches.FancyArrowPatch(
+                (x_tail, y_tail), (x_head, y_head), mutation_scale=scale, color="black"
             )
-            label_ax.set(xticks=[], yticks=[])
+            arrow_ax.add_patch(arrow)
+
+            arrow_ax.set_xlim((0, 1))
+            arrow_ax.set_ylim((0, 1))
+            arrow_ax.set(xticks=[], yticks=[])
+        return arrow_ax
 
     def _format_axes(
         self, axs: Optional[dict[str, Any]] = None, panel_borders: Optional[bool] = None
@@ -170,6 +261,7 @@ class PanelMosaic:
         svg_panel_mapping = {}
         for label, path in panel_mapping.items():
             if path.endswith(".svg"):
+                # TODO add an inset axis for svg images too
                 svg_panel_mapping[label] = path
         self.svg_panel_mapping = svg_panel_mapping
 
@@ -215,6 +307,7 @@ class PanelMosaic:
         return self.fig.copy(), self.axs.copy()
 
     def get_axis_sizes(self):
+        self.fig.canvas.draw()
         sizes = {}
         for label, ax in self.axs.items():
             bbox = ax.get_window_extent().transformed(
@@ -235,18 +328,21 @@ class PanelMosaic:
         precision :
             The precision of the position displays.
         """
-        dummy_fig, dummy_axs = self._set_up_axes()
+        # dummy_fig, dummy_axs = self._set_up_axes()
+        dummy_fig, dummy_axs = self.fig, self.axs
         sizes = self.get_axis_sizes()
         # dummy_fig, dummy_axs = self._get_dummy_axes()
-        self._format_axes(dummy_axs, panel_borders=True)
-        self._label_axes(dummy_axs)
+        # self._format_axes(dummy_axs, panel_borders=True)
+        # self._label_axes(dummy_axs)
+
+        texts = []
         for label, ax in dummy_axs.items():
             # bbox = ax.get_window_extent().transformed(
             #     dummy_fig.dpi_scale_trans.inverted()
             # )
             # width, height = bbox.width, bbox.height
             width, height = sizes[label]
-            ax.text(
+            text = ax.text(
                 0.5,
                 0.5,
                 f"({width:{precision}}, {height:{precision}})",
@@ -256,16 +352,21 @@ class PanelMosaic:
                 transform=ax.transAxes,
                 clip_on=False,
                 zorder=100,
+                backgroundcolor="white",
             )
+            texts.append(text)
             # turn off axis transparency
-            ax.patch.set_alpha(0)
+            # ax.patch.set_alpha(0)
         skunk.display(skunk.pltsvg(dummy_fig))
+        for text in texts:
+            text.remove()
 
     def write(
         self,
         out_path: Union[str, Path],
         formats: tuple = ("svg", "pdf", "png"),
         dpi=300,
+        verbose: bool = False,
     ) -> None:
         """
         Write the figure to specified file(s).
@@ -282,11 +383,26 @@ class PanelMosaic:
         if isinstance(out_path, Path):
             out_path = str(out_path)
         if "svg" in formats:
+            if verbose:
+                print(f"Writing SVG to {out_path}.svg")
+                timer_start = time.time()
             self.write_svg(out_path)
-        if "pdf" in formats:
-            self.write_pdf(out_path)
+            if verbose:
+                print(f"SVG written in {time.time() - timer_start:.2f} seconds")
         if "png" in formats:
+            if verbose:
+                print(f"Writing PNG to {out_path}.png")
+                timer_start = time.time()
             self.write_png(out_path, dpi=dpi)
+            if verbose:
+                print(f"PNG written in {time.time() - timer_start:.2f} seconds")
+        if "pdf" in formats:
+            if verbose:
+                print(f"Writing PDF to {out_path}.pdf")
+                timer_start = time.time()
+            self.write_pdf(out_path)
+            if verbose:
+                print(f"PDF written in {time.time() - timer_start:.2f} seconds")
 
     def write_svg(self, out_path: Union[str, Path]) -> None:
         """
@@ -327,6 +443,19 @@ class PanelMosaic:
         """
         cairosvg.svg2png(bytestring=self.svg, write_to=str(out_path) + ".png", dpi=dpi)
         # self.fig.savefig(str(out_path) + ".png", bbox_inches="tight", dpi=300)
+
+    def close(self) -> None:
+        """
+        Close the figure.
+        """
+        plt.close(self.fig)
+
+    def lock_axes(self) -> None:
+        """
+        Fix the axes of the figure to stop auto-resizing when adding content.
+        """
+        self.fig.canvas.draw()
+        self.fig.set_layout_engine("none")
 
 
 def panel_mosaic(
